@@ -1,3 +1,4 @@
 
 caffe_model/pose_iter_102000.caffemodel
 .idea/*
+media/videos/*
