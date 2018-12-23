@@ -9,6 +9,7 @@ MAX_HANDS_DETECTED = 2
 LIGHT_DURATION_N_SECS = 0.5
 KEYPOINT_DETECTION_PROB_THRESHOLD = 0.5
 NET_INPUT_HEIGHT = 368
+LIGHT_RADIUS_FRAME_HEIGHT_RATIO = 0.02
 
 THUMB_IX = 4
 INDEX_FINGER_IX = 8
@@ -27,12 +28,12 @@ class HandLights():
         if not input_video.isOpened():
             raise FileNotFoundError("The input video path you provided is invalid.")
 
-        video_fps, frame_height, frame_width = self._get_video_properties(input_video)
+        video_fps, frame_h, frame_w = self._get_video_properties(input_video)
         light_duration_n_frames = int(LIGHT_DURATION_N_SECS * video_fps)
         frame_finger_coords_queue = deque(maxlen=light_duration_n_frames)
 
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        output_video = cv2.VideoWriter(output_video_path, fourcc, video_fps,  (frame_width, frame_height))
+        output_video = cv2.VideoWriter(output_video_path, fourcc, video_fps,  (frame_w, frame_h))
 
         i = 0
         while input_video.isOpened():
@@ -51,8 +52,8 @@ class HandLights():
             if i % 5 == 0:
                 print("i", i)
 
-            # if i % 10 == 0:
-            #     break
+            if i % 5 == 0:
+                break
 
         input_video.release()
         output_video.release()
@@ -60,15 +61,6 @@ class HandLights():
     def run_image(self, input_image_path):
         frame = cv2.imread(input_image_path)
         all_finger_coords = self._get_all_finger_coords_from_frame(frame)
-        self._draw_finger_coords(frame, all_finger_coords)
-
-    def _draw_finger_coords(self, frame, all_finger_coords):
-        frame_copy = np.copy(frame)
-        for single_finger_coords, finger_ix in zip(all_finger_coords, FINGER_IXS):
-            for finger_coord in single_finger_coords:
-                self._draw_point(frame_copy, finger_coord, finger_ix)
-
-        cv2.imwrite('output.jpg', frame_copy)
 
     def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue):
         for frame_finger_coords in frame_finger_coords_queue:
@@ -77,17 +69,15 @@ class HandLights():
         return  frame
 
     def _draw_lights_on_frame_using_single_frame_coords(self, frame, frame_finger_coords):
+        frame_copy = np.copy(frame)
+        light_radius = LIGHT_RADIUS_FRAME_HEIGHT_RATIO * frame.shape[0]
+
         for single_finger_coords in frame_finger_coords:
             for finger_coord in single_finger_coords:
-                frame = self._set_region_to_value(frame, finger_coord, value=[255, 255, 255], region_radius=8)
+                mask = self._get_circular_mask(frame_copy, radius=light_radius, coordinate=finger_coord)
+                frame_copy[mask] = [255, 255, 255]
 
-        return frame
-
-    def _draw_point(self, frame, coordinate, finger_ix=0):
-        coord_y, coord_x = coordinate
-        cv2.circle(frame, (coord_x, coord_y), 8, (0, 255, 255), thickness=-1, lineType=cv2.FILLED)
-        # cv2.putText(frame, "{}".format(finger_ix), (coord_x, coord_y), cv2.FONT_HERSHEY_SIMPLEX, 1,
-        #             (0, 0, 255), 2, lineType=cv2.LINE_AA)
+        return frame_copy
 
     def _get_all_finger_coords_from_frame(self, frame):
         all_finger_coords = []
@@ -108,6 +98,15 @@ class HandLights():
             all_finger_coords.append(finger_coords)
 
         return all_finger_coords
+
+    def _get_circular_mask(self, frame, radius, coordinate):
+        img_h, img_w = frame.shape[0], frame.shape[1]
+        center_y, center_x = coordinate
+
+        y, x = np.ogrid[-center_y: img_h - center_y, -center_x: img_w - center_x]
+        circular_mask = x * x + y * y <= radius * radius
+
+        return circular_mask
 
     def _get_max_prob_coordinate(self, probability_map):
         probability = np.max(probability_map)
@@ -137,7 +136,8 @@ class HandLights():
             finger_coords.append(coord_resized)
 
             # Remove coordinate from the probability map so that it is not retrieved again.
-            probability_map = self._set_region_to_value(probability_map, coordinate, value=0.0)
+            mask = self._get_circular_mask(probability_map, radius=3, coordinate=coordinate)
+            probability_map[mask] = 0.0
 
         return finger_coords
 
@@ -154,22 +154,6 @@ class HandLights():
         coord_resized_x = int(coord_x * width_ratio)
 
         return coord_resized_y, coord_resized_x
-
-    def _set_region_to_value(self, np_array, coordinate, value, region_radius=2):
-        np_array_copy = np.copy(np_array)
-
-        height = np_array.shape[0] - 1
-        width = np_array.shape[1] - 1
-
-        coord_y, coord_x = coordinate
-        y0 = max(coord_y - region_radius, 0)
-        y1 = min(coord_y + region_radius, height)
-        x0 = max(coord_x - region_radius, 0)
-        x1 = min(coord_x + region_radius, width)
-
-        np_array_copy[y0:y1, x0:x1] = value
-
-        return np_array_copy
 
 
 if __name__== "__main__":
