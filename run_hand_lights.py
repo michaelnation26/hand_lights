@@ -9,7 +9,11 @@ MAX_HANDS_DETECTED = 2
 LIGHT_DURATION_N_SECS = 0.5
 KEYPOINT_DETECTION_PROB_THRESHOLD = 0.5
 NET_INPUT_HEIGHT = 368
+
 LIGHT_RADIUS_FRAME_HEIGHT_RATIO = 0.02
+LIGHT_MAX_ALPHA = 1.0
+
+BGR_GREEN = [57, 255, 20]
 
 THUMB_IX = 4
 INDEX_FINGER_IX = 8
@@ -52,8 +56,8 @@ class HandLights():
             if i % 5 == 0:
                 print("i", i)
 
-            if i % 5 == 0:
-                break
+            # if i % 5 == 0:
+            #     break
 
         input_video.release()
         output_video.release()
@@ -61,23 +65,30 @@ class HandLights():
     def run_image(self, input_image_path):
         frame = cv2.imread(input_image_path)
         all_finger_coords = self._get_all_finger_coords_from_frame(frame)
+        frame_drawn = self._draw_lights_on_frame_using_single_frame_coords(frame, all_finger_coords)
+        cv2.imwrite("media/images/output_img.jpg", frame_drawn)
 
     def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue):
-        for frame_finger_coords in frame_finger_coords_queue:
-            frame = self._draw_lights_on_frame_using_single_frame_coords(frame, frame_finger_coords)
+        queue_size = len(frame_finger_coords_queue)
+        alphas = np.linspace(0.0, LIGHT_MAX_ALPHA, num=queue_size+1)[1:] # skip first alpha value (0.0)
+
+        for frame_finger_coords, alpha in zip(frame_finger_coords_queue, alphas):
+            frame = self._draw_lights_on_frame_using_single_frame_coords(frame, frame_finger_coords, alpha)
 
         return  frame
 
-    def _draw_lights_on_frame_using_single_frame_coords(self, frame, frame_finger_coords):
-        frame_copy = np.copy(frame)
+    def _draw_lights_on_frame_using_single_frame_coords(self, frame, frame_finger_coords, alpha=LIGHT_MAX_ALPHA):
+        frame_with_lights = np.copy(frame)
         light_radius = LIGHT_RADIUS_FRAME_HEIGHT_RATIO * frame.shape[0]
 
         for single_finger_coords in frame_finger_coords:
             for finger_coord in single_finger_coords:
-                mask = self._get_circular_mask(frame_copy, radius=light_radius, coordinate=finger_coord)
-                frame_copy[mask] = [255, 255, 255]
+                mask = self._get_circular_mask(frame_with_lights, radius=light_radius, coordinate=finger_coord)
+                frame_with_lights[mask] = BGR_GREEN
 
-        return frame_copy
+        frame_with_transparent_lights = cv2.addWeighted(frame_with_lights, alpha, frame, 1.0-alpha, 0)
+
+        return frame_with_transparent_lights
 
     def _get_all_finger_coords_from_frame(self, frame):
         all_finger_coords = []
@@ -159,11 +170,14 @@ class HandLights():
 if __name__== "__main__":
     PROTO_FILE_PATH = "caffe_model/pose_deploy.prototxt"
     WEIGHTS_FILE_PATH = "caffe_model/pose_iter_102000.caffemodel"
+    INPUT_IMAGE_PATH = "media/images/front_back.jpg"
     INPUT_VIDEO_PATH = "media/videos/sign_language.mp4"
     OUTPUT_VIDEO_PATH = "media/videos/output_video.mp4"
 
     hand_lights = HandLights(PROTO_FILE_PATH, WEIGHTS_FILE_PATH)
     t = time.time()
+
+    #hand_lights.run_image(INPUT_IMAGE_PATH)
     hand_lights.run_video(INPUT_VIDEO_PATH, OUTPUT_VIDEO_PATH)
 
     total_minutes = (time.time() - t) / 60.0
