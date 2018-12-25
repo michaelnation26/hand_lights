@@ -12,6 +12,7 @@ NET_INPUT_HEIGHT = 368
 
 LIGHT_RADIUS_FRAME_HEIGHT_RATIO = 0.02
 LIGHT_MAX_ALPHA = 1.0
+LIGHT_GAUSSIAN_BLUR_K_SIZE = (17, 17)
 
 BGR_GREEN = [57, 255, 20]
 
@@ -56,8 +57,8 @@ class HandLights():
             if i % 5 == 0:
                 print("i", i)
 
-            # if i % 5 == 0:
-            #     break
+            if i % 15 == 0:
+                break
 
         input_video.release()
         output_video.release()
@@ -71,24 +72,42 @@ class HandLights():
     def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue):
         queue_size = len(frame_finger_coords_queue)
         alphas = np.linspace(0.0, LIGHT_MAX_ALPHA, num=queue_size+1)[1:] # skip first alpha value (0.0)
+        masks_merged_all_frames = np.full(frame.shape[:2], fill_value=False, dtype=bool)
 
         for frame_finger_coords, alpha in zip(frame_finger_coords_queue, alphas):
-            frame = self._draw_lights_on_frame_using_single_frame_coords(frame, frame_finger_coords, alpha)
+            frame, masks_merged = self._draw_lights_on_frame_using_single_frame_coords(frame, frame_finger_coords, alpha)
+            masks_merged_all_frames = np.logical_or(masks_merged_all_frames, masks_merged)
+
+        # Replace lights with the blurred lights.
+        frame_blurred = cv2.GaussianBlur(frame, LIGHT_GAUSSIAN_BLUR_K_SIZE, 0)
+        frame[masks_merged_all_frames] = frame_blurred[masks_merged_all_frames]
 
         return  frame
 
     def _draw_lights_on_frame_using_single_frame_coords(self, frame, frame_finger_coords, alpha=LIGHT_MAX_ALPHA):
+        """
+        Using the finger coordinates of a single frame, lights are drawn in a circular shape with the alpha parameter.
+        The circular mask for each finger coordinate is saved into a single mask called masks_merged.
+
+        :param frame:
+        :param frame_finger_coords:
+        :param alpha:
+        :return:
+        """
         frame_with_lights = np.copy(frame)
         light_radius = LIGHT_RADIUS_FRAME_HEIGHT_RATIO * frame.shape[0]
+        masks_merged = np.full(frame.shape[:2], fill_value=False, dtype=bool)
 
         for single_finger_coords in frame_finger_coords:
             for finger_coord in single_finger_coords:
                 mask = self._get_circular_mask(frame_with_lights, radius=light_radius, coordinate=finger_coord)
                 frame_with_lights[mask] = BGR_GREEN
 
+                masks_merged = np.logical_or(masks_merged, mask)
+
         frame_with_transparent_lights = cv2.addWeighted(frame_with_lights, alpha, frame, 1.0-alpha, 0)
 
-        return frame_with_transparent_lights
+        return frame_with_transparent_lights, masks_merged
 
     def _get_all_finger_coords_from_frame(self, frame):
         all_finger_coords = []
