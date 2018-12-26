@@ -1,9 +1,9 @@
 # Copyright (c) 2018 Michael Nation
 # Licensed under the MIT License.
+from collections import deque
+
 import cv2
 import numpy as np
-
-from collections import deque
 
 
 MAX_HANDS_DETECTED = 2
@@ -15,20 +15,31 @@ LIGHT_RADIUS_FRAME_HEIGHT_RATIO = 0.02
 LIGHT_MAX_ALPHA = 1.0
 LIGHT_GAUSSIAN_BLUR_K_SIZE = (17, 17)
 
-BGR_GREEN = [57, 255, 20]
-
 THUMB_IX = 4
 INDEX_FINGER_IX = 8
 MIDDLE_FINGER_IX = 12
 RING_FINGER_IX = 16
 PINKY_FINGER_IX = 20
 
+BGR_BLUE = [255, 102, 70]
+BGR_GREEN = [57, 255, 20]
+BGR_RED = [58, 7, 255]
+BGR_WHITE = [250, 250, 255]
+BGR_YELLOW = [21, 243, 243]
+BGR_COLORS = {
+    "blue": BGR_BLUE,
+    "green": BGR_GREEN,
+    "red": BGR_RED,
+    "white": BGR_WHITE,
+    "yellow": BGR_YELLOW
+}
+
 class HandLights():
 
     def __init__(self, proto_file_path, weights_file_path):
         self.net = cv2.dnn.readNetFromCaffe(proto_file_path, weights_file_path)
 
-    def run_video(self, input_video_path, output_video_path="output_video.mp4", fingers="all"):
+    def run_video(self, input_video_path, output_video_path="output_video.mp4", fingers="all", light_color="green"):
         input_video = cv2.VideoCapture(input_video_path)
         if not input_video.isOpened():
             raise FileNotFoundError("The input video path you provided is invalid.")
@@ -53,7 +64,7 @@ class HandLights():
             finger_coords = self._get_all_finger_coords_from_frame(frame, finger_ixs)
             frame_finger_coords_queue.append(finger_coords)
 
-            frame_drawn = self._draw_lights_on_frame_using_coords_queue(frame, frame_finger_coords_queue)
+            frame_drawn = self._draw_lights_on_frame_using_coords_queue(frame, frame_finger_coords_queue, light_color)
             output_video.write(frame_drawn)
 
             if i % 5 == 0:
@@ -65,11 +76,11 @@ class HandLights():
         input_video.release()
         output_video.release()
 
-    def run_image(self, input_image_path, fingers="all"):
+    def run_image(self, input_image_path, fingers="all", light_color="green"):
         frame = cv2.imread(input_image_path)
         finger_ixs = self._get_finger_ixs(fingers)
         all_finger_coords = self._get_all_finger_coords_from_frame(frame, finger_ixs)
-        frame_drawn = self._draw_lights_on_frame_using_single_frame_coords(frame, all_finger_coords)
+        frame_drawn = self._draw_lights_on_frame_using_single_frame_coords(frame, all_finger_coords, light_color)
         cv2.imwrite("media/images/output_img.jpg", frame_drawn)
 
     def _blur_lights(self, frame, lights_mask):
@@ -84,20 +95,21 @@ class HandLights():
         return frame_copy
 
 
-    def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue):
+    def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue, light_color):
         queue_size = len(frame_finger_coords_queue)
         alphas = np.linspace(0.0, LIGHT_MAX_ALPHA, num=queue_size+1)[1:] # skip first alpha value (0.0)
         masks_merged_all_frames = np.full(frame.shape[:2], fill_value=False, dtype=bool)
 
         for frame_finger_coords, alpha in zip(frame_finger_coords_queue, alphas):
-            frame, masks_merged = self._draw_lights_on_frame_using_single_frame_coords(frame, frame_finger_coords, alpha)
+            frame, masks_merged = self._draw_lights_on_frame_using_single_frame_coords(frame, frame_finger_coords,
+                                                                                       light_color, alpha)
             masks_merged_all_frames = np.logical_or(masks_merged_all_frames, masks_merged)
 
         frame = self._blur_lights(frame, masks_merged_all_frames)
 
         return  frame
 
-    def _draw_lights_on_frame_using_single_frame_coords(self, frame, frame_finger_coords, alpha=LIGHT_MAX_ALPHA):
+    def _draw_lights_on_frame_using_single_frame_coords(self, frame, frame_finger_coords, light_color, alpha=1.0):
         """
         Using the finger coordinates of a single frame, lights are drawn in a circular shape with the alpha parameter.
         The circular mask for each finger coordinate is saved into a single mask called masks_merged.
@@ -105,25 +117,18 @@ class HandLights():
         frame_with_lights = np.copy(frame)
         light_radius = LIGHT_RADIUS_FRAME_HEIGHT_RATIO * frame.shape[0]
         masks_merged = np.full(frame.shape[:2], fill_value=False, dtype=bool)
+        light_colors_BGR_for_fingers = self._get_light_colors_BGR_for_fingers(light_color, n_fingers=len(frame_finger_coords))
 
-        for single_finger_coords in frame_finger_coords:
+        for single_finger_coords, light_color_BGR_for_finger in zip(frame_finger_coords, light_colors_BGR_for_fingers):
             for finger_coord in single_finger_coords:
                 mask = self._get_circular_mask(frame_with_lights, radius=light_radius, coordinate=finger_coord)
-                frame_with_lights[mask] = BGR_GREEN
+                frame_with_lights[mask] = light_color_BGR_for_finger
 
                 masks_merged = np.logical_or(masks_merged, mask)
 
         frame_with_transparent_lights = cv2.addWeighted(frame_with_lights, alpha, frame, 1.0-alpha, 0)
 
         return frame_with_transparent_lights, masks_merged
-
-    def _get_finger_ixs(self, fingers):
-        if fingers == "index":
-            finger_ixs = [INDEX_FINGER_IX]
-        else: # all
-            finger_ixs = [THUMB_IX, INDEX_FINGER_IX, MIDDLE_FINGER_IX, RING_FINGER_IX, PINKY_FINGER_IX]
-
-        return finger_ixs
 
     def _get_all_finger_coords_from_frame(self, frame, finger_ixs):
         all_finger_coords = []
@@ -153,6 +158,22 @@ class HandLights():
         circular_mask = x * x + y * y <= radius * radius
 
         return circular_mask
+
+    def _get_finger_ixs(self, fingers):
+        if fingers == "index":
+            finger_ixs = [INDEX_FINGER_IX]
+        else: # all
+            finger_ixs = [THUMB_IX, INDEX_FINGER_IX, MIDDLE_FINGER_IX, RING_FINGER_IX, PINKY_FINGER_IX]
+
+        return finger_ixs
+
+    def _get_light_colors_BGR_for_fingers(self, light_color, n_fingers):
+        if light_color == "all":
+            light_colors_BGR = list(BGR_COLORS.values())[:n_fingers]
+        else:
+            light_colors_BGR = [BGR_COLORS[light_color]] * n_fingers
+
+        return light_colors_BGR
 
     def _get_max_prob_coordinate(self, probability_map):
         probability = np.max(probability_map)
