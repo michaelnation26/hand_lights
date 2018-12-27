@@ -4,10 +4,10 @@ from collections import deque
 
 import cv2
 import numpy as np
+import time
 
 
 MAX_HANDS_DETECTED = 2
-LIGHT_DURATION_N_SECS = 0.5
 KEYPOINT_DETECTION_PROB_THRESHOLD = 0.5
 NET_INPUT_HEIGHT = 368
 
@@ -39,13 +39,14 @@ class HandLights():
     def __init__(self, proto_file_path, weights_file_path):
         self.net = cv2.dnn.readNetFromCaffe(proto_file_path, weights_file_path)
 
-    def run_video(self, input_video_path, output_video_path="output_video.mp4", fingers="all", light_color="green"):
+    def run_video(self, input_video_path, output_video_path="output_video.mp4", fingers="all", light_color="green",
+                  light_duration_n_secs=0.2, mirror=False, verbose=False):
         input_video = cv2.VideoCapture(input_video_path)
         if not input_video.isOpened():
             raise FileNotFoundError("The input video path you provided is invalid.")
 
-        video_fps, frame_h, frame_w = self._get_video_properties(input_video)
-        light_duration_n_frames = int(LIGHT_DURATION_N_SECS * video_fps)
+        video_fps, frame_h, frame_w, frame_count = self._get_video_properties(input_video)
+        light_duration_n_frames = int(light_duration_n_secs * video_fps)
         frame_finger_coords_queue = deque(maxlen=light_duration_n_frames)
 
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -53,28 +54,36 @@ class HandLights():
 
         finger_ixs = self._get_finger_ixs(fingers)
 
-        i = 0
+        if verbose:
+            current_frame_ix = 0
+            start_time = time.time()
+
         while input_video.isOpened():
             grabbed, frame = input_video.read()
             if not grabbed:
                 break
 
-            i += 1
-
             finger_coords = self._get_all_finger_coords_from_frame(frame, finger_ixs)
             frame_finger_coords_queue.append(finger_coords)
 
-            frame_drawn = self._draw_lights_on_frame_using_coords_queue(frame, frame_finger_coords_queue, light_color)
+            frame_drawn = self._draw_lights_on_frame_using_coords_queue(frame, frame_finger_coords_queue, light_color, mirror)
             output_video.write(frame_drawn)
 
-            if i % 5 == 0:
-                print("i", i)
+            if verbose:
+                current_frame_ix += 1
+                avg_secs_per_frame = (time.time() - start_time) / current_frame_ix
+                print(" Frame {} of {} complete. Average processing speed: {:.1f} secs/frame."
+                      .format(current_frame_ix, frame_count, avg_secs_per_frame), end="\r")
 
-            if i % 5 == 0:
-                break
+                if current_frame_ix % 5 == 0:
+                    break
 
         input_video.release()
         output_video.release()
+
+        if verbose:
+            total_minutes = (time.time() - start_time) / 60.0
+            print("\nTotal processing time : {:.2f} minutes.".format(total_minutes))
 
     def run_image(self, input_image_path, fingers="all", light_color="green"):
         frame = cv2.imread(input_image_path)
@@ -95,7 +104,7 @@ class HandLights():
         return frame_copy
 
 
-    def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue, light_color):
+    def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue, light_color, mirror=False):
         queue_size = len(frame_finger_coords_queue)
         alphas = np.linspace(0.0, LIGHT_MAX_ALPHA, num=queue_size+1)[1:] # skip first alpha value (0.0)
         masks_merged_all_frames = np.full(frame.shape[:2], fill_value=False, dtype=bool)
@@ -106,6 +115,8 @@ class HandLights():
             masks_merged_all_frames = np.logical_or(masks_merged_all_frames, masks_merged)
 
         frame = self._blur_lights(frame, masks_merged_all_frames)
+        if mirror:
+            frame = np.fliplr(frame)
 
         return  frame
 
@@ -212,8 +223,9 @@ class HandLights():
         video_fps = round(video.get(cv2.CAP_PROP_FPS))
         frame_height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
         frame_width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        return video_fps, frame_height, frame_width
+        return video_fps, frame_height, frame_width, frame_count
 
     def _resize_coordinate(self, coordinate, height_ratio, width_ratio):
         coord_y, coord_x = coordinate
