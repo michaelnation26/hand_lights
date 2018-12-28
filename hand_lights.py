@@ -1,7 +1,29 @@
-# Copyright (c) 2018 Michael Nation
-# Licensed under the MIT License.
+"""
+Copyright (c) 2018 Michael Nation
+Licensed under the MIT License.
+
+Examples on how to execute this file.
+
+
+Example #1 - All default parameter values
+
+python hand_lights.py \
+--input_video_path media/videos/my_video.mp4 \
+--output_video_path media/videos/my_video_output.mp4
+
+
+Example #2 - Dark background
+
+python hand_lights.py \
+--input_video_path media/videos/sign_language.mp4 \
+--output_video_path media/videos/output_video.mp4 \
+--background_alpha 0.2 \
+--verbose True
+
+"""
 from collections import deque
 
+import argparse
 import cv2
 import numpy as np
 import time
@@ -37,10 +59,10 @@ BGR_COLORS = {
 class HandLights():
 
     def __init__(self, proto_file_path, weights_file_path):
-        self.net = cv2.dnn.readNetFromCaffe(proto_file_path, weights_file_path)
+        self._net = cv2.dnn.readNetFromCaffe(proto_file_path, weights_file_path)
 
     def run_video(self, input_video_path, output_video_path="output_video.mp4", fingers="all", light_color="green",
-                  light_duration_n_secs=0.2, mirror=False, verbose=False):
+                  light_duration_n_secs=0.2, background_alpha=1.0, mirror=False, verbose=False):
         input_video = cv2.VideoCapture(input_video_path)
         if not input_video.isOpened():
             raise FileNotFoundError("The input video path you provided is invalid.")
@@ -66,7 +88,8 @@ class HandLights():
             finger_coords = self._get_all_finger_coords_from_frame(frame, finger_ixs)
             frame_finger_coords_queue.append(finger_coords)
 
-            frame_drawn = self._draw_lights_on_frame_using_coords_queue(frame, frame_finger_coords_queue, light_color, mirror)
+            frame_drawn = self._draw_lights_on_frame_using_coords_queue(frame, frame_finger_coords_queue, light_color,
+                                                                        background_alpha, mirror)
             output_video.write(frame_drawn)
 
             if verbose:
@@ -103,8 +126,22 @@ class HandLights():
 
         return frame_copy
 
+    def _darken_background(self, frame, lights_mask, background_alpha):
+        """
+        The entire frame except for the lights will be darkened based on the background_alpha value.
 
-    def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue, light_color, mirror=False):
+        :param background_alpha: 0.0 creates a solid black background. 1.0 leaves the background unmodified/opaque.
+        """
+        frame_copy = np.copy(frame)
+        black_frame = np.zeros_like(frame)
+        background_mask = np.logical_not(lights_mask)
+
+        frame_darkened = cv2.addWeighted(frame, background_alpha, black_frame, 1.0 - background_alpha, 0)
+        frame_copy[background_mask] = frame_darkened[background_mask]
+
+        return frame_copy
+
+    def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue, light_color, background_alpha, mirror):
         queue_size = len(frame_finger_coords_queue)
         alphas = np.linspace(0.0, LIGHT_MAX_ALPHA, num=queue_size+1)[1:] # skip first alpha value (0.0)
         masks_merged_all_frames = np.full(frame.shape[:2], fill_value=False, dtype=bool)
@@ -115,6 +152,7 @@ class HandLights():
             masks_merged_all_frames = np.logical_or(masks_merged_all_frames, masks_merged)
 
         frame = self._blur_lights(frame, masks_merged_all_frames)
+        frame = self._darken_background(frame, masks_merged_all_frames, background_alpha)
         if mirror:
             frame = np.fliplr(frame)
 
@@ -150,8 +188,8 @@ class HandLights():
 
         input_blob = cv2.dnn.blobFromImage(frame, 1.0 / 255, (net_input_width, NET_INPUT_HEIGHT),
                                            (0, 0, 0), swapRB=False, crop=False)
-        self.net.setInput(input_blob)
-        prediction = self.net.forward()
+        self._net.setInput(input_blob)
+        prediction = self._net.forward()
 
         for finger_ix in finger_ixs:
             probability_map = prediction[0, finger_ix, :, :]
@@ -233,3 +271,38 @@ class HandLights():
         coord_resized_x = int(coord_x * width_ratio)
 
         return coord_resized_y, coord_resized_x
+
+
+if __name__== "__main__":
+    parser = argparse.ArgumentParser(description='Draws virtual lights using bare hands.')
+    parser.add_argument("--proto_file_path", type=str, default="caffe_model/pose_deploy.prototxt",
+                        help='Path to the Caffe Pose prototxt file.')
+    parser.add_argument("--weights_file_path", type=str, default="caffe_model/pose_iter_102000.caffemodel",
+                        help='Path to the Caffe Pose model.')
+    parser.add_argument("--input_video_path", type=str, required=True,
+                        help='Path to the video that will be processed. e.g. media/videos/my_video.mp4')
+    parser.add_argument("--output_video_path", type=str, required=True,
+                        help='Where to save the processed video. e.g. media/videos/my_video_output.mp4')
+    parser.add_argument("--fingers", type=str, default="all", choices=["all", "index"],
+                        help='Specifies which finger(s) will be detected in the video.')
+    parser.add_argument("--light_color", type=str, default="green",
+                        choices=["all", "blue", "green", "red", "white", "yellow"],
+                        help="The color of the lights that are drawn. 'all' should only be used when fingers=all.")
+    parser.add_argument("--light_duration_n_secs", type=float, default=0.2,
+                        help="How long a light will be visible for.")
+    parser.add_argument("--background_alpha", type=float, default=1.0,
+                        help="0.0 creates a solid black background. 1.0 leaves the background unmodified/opaque.")
+    parser.add_argument("--mirror", type=bool, default=False,
+                        help="Each frame in the output video will be a mirror image.")
+    parser.add_argument("--verbose", type=bool, default=False,
+                        help='Prints processing status information to console.')
+
+    args = parser.parse_args()
+
+    hand_lights = HandLights(args.proto_file_path, args.weights_file_path)
+
+
+    #INPUT_IMAGE_PATH = "media/images/front_back.jpg"
+    #hand_lights.run_image(INPUT_IMAGE_PATH)
+    hand_lights.run_video(args.input_video_path, args.output_video_path, args.fingers, args.light_color,
+                          args.light_duration_n_secs, args.background_alpha, args.mirror, args.verbose)
