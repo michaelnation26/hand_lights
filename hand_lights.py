@@ -1,39 +1,6 @@
-"""
-Copyright (c) 2018 Michael Nation
-Licensed under the MIT License.
+# Copyright (c) 2018 Michael Nation
+# Licensed under the MIT License.
 
-Examples on how to execute this file.
-
-
-Example #1 - All default parameter values
-
-python hand_lights.py \
---input_video_path media/videos/my_video.mp4 \
---output_video_path media/videos/my_video_output.mp4
-
-
-Example #2 - Dark background
-
-python hand_lights.py \
---gpu_mode True \
---input_video_path media/videos/finger_roll_slow.mp4 \
---output_video_path media/videos/finger_roll_slow_output.mp4 \
---background_alpha 0.2 \
---verbose True
-
-Example #3 - Draw text
-
-python hand_lights.py \
---input_video_path media/videos/draw_name.mp4 \
---output_video_path media/videos/draw_name_output.mp4 \
---fingers index \
---max_hands_detected 1 \
---light_duration_n_secs 10 \
---background_alpha 0.2 \
---mirror True \
---verbose True
-
-"""
 from collections import deque
 
 import argparse
@@ -67,20 +34,15 @@ BGR_COLORS = {
     "yellow": BGR_YELLOW
 }
 
+
 class HandLights():
 
-    def __init__(self, proto_file_path, weights_file_path, gpu_mode=False):
-        self._gpu_mode = gpu_mode
-        if gpu_mode:
-            import caffe
-            caffe.set_mode_gpu()
-            self._net = caffe.Net(proto_file_path, weights_file_path, caffe.TEST)
-        else:
-            self._net = cv2.dnn.readNetFromCaffe(proto_file_path, weights_file_path)
+    def __init__(self, proto_file_path, weights_file_path):
+        self._net = cv2.dnn.readNetFromCaffe(proto_file_path, weights_file_path)
 
     def run_video(self, input_video_path, output_video_path="output_video.mp4", fingers="all", max_hands_detected=2,
                   light_color="green", light_duration_n_secs=0.1, light_radius_frame_height_ratio=0.015,
-                  background_alpha=1.0, mirror=False, verbose=False):
+                  light_same_alpha=False, background_alpha=1.0, mirror=False, verbose=False):
         input_video = cv2.VideoCapture(input_video_path)
         if not input_video.isOpened():
             raise FileNotFoundError("The input video path you provided is invalid.")
@@ -105,18 +67,16 @@ class HandLights():
             frame_finger_coords_queue.append(finger_coords)
 
             frame_drawn = self._draw_lights_on_frame_using_coords_queue(frame, frame_finger_coords_queue, light_color,
-                                                                        light_radius_frame_height_ratio, background_alpha,
-                                                                        mirror)
+                                                                        light_radius_frame_height_ratio, light_same_alpha,
+                                                                        background_alpha, mirror)
             output_video.write(frame_drawn)
 
             current_frame_ix += 1
-            if verbose and current_frame_ix % 30 == 0:
+            if verbose:
                 avg_secs_per_frame = (time.time() - start_time) / current_frame_ix
+                # If this code is being run in a Jupyter or IPython Notebook, remove end="\r" from the print function.
                 print(" Frame {} of {} complete. Average processing speed: {:.2f} secs/frame."
-                      .format(current_frame_ix, frame_count, avg_secs_per_frame)) #, end="\r")
-
-            # if verbose and current_frame_ix % 2 == 0:
-            #     break
+                      .format(current_frame_ix, frame_count, avg_secs_per_frame), end="\r")
 
         input_video.release()
         output_video.release()
@@ -124,13 +84,6 @@ class HandLights():
         if verbose:
             total_minutes = (time.time() - start_time) / 60.0
             print("\nTotal processing time : {:.2f} minutes.".format(total_minutes))
-
-    def run_image(self, input_image_path, fingers="all", light_color="green"):
-        frame = cv2.imread(input_image_path)
-        finger_ixs = self._get_finger_ixs(fingers)
-        all_finger_coords = self._get_all_finger_coords_from_frame(frame, finger_ixs)
-        frame_drawn = self._draw_lights_on_frame_using_single_frame_coords(frame, all_finger_coords, light_color)
-        cv2.imwrite("media/images/output_img.jpg", frame_drawn)
 
     def _blur_lights(self, frame, lights_mask):
         """
@@ -155,9 +108,8 @@ class HandLights():
         return frame_darkened
 
     def _draw_lights_on_frame_using_coords_queue(self, frame, frame_finger_coords_queue, light_color,
-                                                 light_radius_frame_height_ratio, background_alpha, mirror):
-        queue_size = len(frame_finger_coords_queue)
-        light_alphas = np.linspace(0.0, LIGHT_MAX_ALPHA, num=queue_size+1)[1:] # skip first alpha value (0.0)
+                                                 light_radius_frame_height_ratio, light_same_alpha, background_alpha, mirror):
+        light_alphas = self._get_light_alphas_for_frame(light_same_alpha, frames_queue_size=len(frame_finger_coords_queue))
         masks_merged_all_frames = np.full(frame.shape[:2], fill_value=False, dtype=bool)
         frame = self._darken_frame(frame, background_alpha)
 
@@ -206,12 +158,8 @@ class HandLights():
         input_blob = cv2.dnn.blobFromImage(frame, 1.0 / 255, (net_input_width, NET_INPUT_HEIGHT),
                                            (0, 0, 0), swapRB=False, crop=False)
 
-        if self._gpu_mode:
-            self._net.blobs['data'] = input_blob
-            prediction = self._net.forward()['net_output']
-        else:
-            self._net.setInput(input_blob)
-            prediction = self._net.forward()
+        self._net.setInput(input_blob)
+        prediction = self._net.forward()
 
         for finger_ix in finger_ixs:
             probability_map = prediction[0, finger_ix, :, :]
@@ -237,6 +185,14 @@ class HandLights():
             finger_ixs = [THUMB_IX, INDEX_FINGER_IX, MIDDLE_FINGER_IX, RING_FINGER_IX, PINKY_FINGER_IX]
 
         return finger_ixs
+
+    def _get_light_alphas_for_frame(self, light_same_alpha, frames_queue_size):
+        if light_same_alpha:
+            light_alphas = [LIGHT_MAX_ALPHA] * frames_queue_size
+        else:
+            light_alphas = np.linspace(0.0, LIGHT_MAX_ALPHA, num=frames_queue_size + 1)[1:]  # skip first alpha value (0.0)
+
+        return light_alphas
 
     def _get_light_colors_BGR_for_fingers(self, light_color, n_fingers):
         if light_color == "all":
@@ -309,8 +265,6 @@ if __name__== "__main__":
                         help='Path to the Caffe Pose prototxt file.')
     parser.add_argument("--weights_file_path", type=str, default="caffe_model/pose_iter_102000.caffemodel",
                         help='Path to the Caffe Pose model.')
-    parser.add_argument("--gpu_mode", type=bool, default=False,
-                        help='If False, cpu will be used.')
     parser.add_argument("--input_video_path", type=str, required=True,
                         help='Path to the video that will be processed. e.g. media/videos/my_video.mp4')
     parser.add_argument("--output_video_path", type=str, required=True,
@@ -326,20 +280,17 @@ if __name__== "__main__":
                         help="How long a light will be visible for.")
     parser.add_argument("--light_radius_frame_height_ratio", type=restricted_float_0_to_1, default=0.015,
                         help="Ratio of the light radius relative to the frame height.")
+    parser.add_argument("--light_same_alpha", type=bool, default=False,
+                        help='If set to True, light alpha values will not decrease. LIGHT_MAX_ALPHA will be used on all lights.')
     parser.add_argument("--background_alpha", type=restricted_float_0_to_1, default=1.0,
                         help="0.0 creates a solid black background. 1.0 leaves the background unmodified/opaque.")
     parser.add_argument("--mirror", type=bool, default=False,
                         help="Each frame in the output video will be a mirror image.")
     parser.add_argument("--verbose", type=bool, default=False,
                         help='Prints processing status information to console.')
-
     args = parser.parse_args()
 
-    hand_lights = HandLights(args.proto_file_path, args.weights_file_path, args.gpu_mode)
-
-
-    #INPUT_IMAGE_PATH = "media/images/front_back.jpg"
-    #hand_lights.run_image(INPUT_IMAGE_PATH)
+    hand_lights = HandLights(args.proto_file_path, args.weights_file_path)
     hand_lights.run_video(args.input_video_path, args.output_video_path, args.fingers, args.max_hands_detected, args.light_color,
-                          args.light_duration_n_secs, args.light_radius_frame_height_ratio, args.background_alpha,
-                          args.mirror, args.verbose)
+                          args.light_duration_n_secs, args.light_radius_frame_height_ratio, args.light_same_alpha,
+                          args.background_alpha, args.mirror, args.verbose)
