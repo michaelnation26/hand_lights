@@ -40,11 +40,11 @@ The following examples will demonstrate several ways to run the python program. 
 
 ### Example \#1 - All default parameter values
 
-`
+```
 python hand_lights.py \
 --input_video_path media/videos/vertical.mp4 \
 --output_video_path media/videos/vertical_output.mp4
-`
+```
 
 <p align="center">
     <img src="media/images/example_1.png", width="600">
@@ -52,12 +52,12 @@ python hand_lights.py \
 
 ### Example \#2 - Darken background
 
-`
+```
 python hand_lights.py \
 --input_video_path media/videos/vertical.mp4 \
 --output_video_path media/videos/vertical_output.mp4 \
 --background_alpha 0.3
-`
+```
 
 <p align="center">
     <img src="media/images/example_2.png", width="600">
@@ -65,12 +65,12 @@ python hand_lights.py \
 
 ### Example \#3 - Single color
 
-`
+```
 python hand_lights.py \
 --input_video_path media/videos/vertical.mp4 \
 --output_video_path media/videos/vertical_output.mp4 \
 --light_color red
-`
+```
 
 <p align="center">
     <img src="media/images/example_3.png", width="600">
@@ -78,12 +78,12 @@ python hand_lights.py \
 
 ### Example \#4 - All colors
 
-`
+```
 python hand_lights.py \
 --input_video_path media/videos/vertical.mp4 \
 --output_video_path media/videos/vertical_output.mp4 \
 --light_color all
-`
+```
 
 <p align="center">
     <img src="media/images/example_4.png", width="600">
@@ -91,12 +91,12 @@ python hand_lights.py \
 
 ### Example \#5 - Light size
 
-`
+```
 python hand_lights.py \
 --input_video_path media/videos/vertical.mp4 \
 --output_video_path media/videos/vertical_output.mp4 \
 --light_radius_frame_height_ratio 0.05
-`
+```
 
 <p align="center">
     <img src="media/images/example_5.png", width="600">
@@ -104,7 +104,7 @@ python hand_lights.py \
 
 ### Example \#6 - Draw text
 
-`
+```
 python hand_lights.py \
 --input_video_path media/videos/draw_initials.mp4 \
 --output_video_path media/videos/draw_initials_output.mp4 \
@@ -113,7 +113,7 @@ python hand_lights.py \
 --light_duration_n_secs 12 \
 --light_same_alpha True \
 --mirror True
-`
+```
 
 <p align="center">
     <img src="media/images/example_6.png", width="600">
@@ -157,10 +157,10 @@ A Gaussian Blur is used to smoothen out the overlapping edges between light circ
 
 To recreate the last example, use the following script.
 
-`
+```
 python hand_lights.py \
 --input_video_path media/videos/vertical.mp4 \
 --output_video_path media/videos/vertical_output.mp4 \
 --light_duration_n_secs 0.5 \
 --light_radius_frame_height_ratio 0.03
-`
+```
